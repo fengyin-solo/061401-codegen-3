@@ -3,12 +3,28 @@ import { computed } from 'vue'
 import StatusPanel from '@/components/StatusPanel.vue'
 import ActionButtons from '@/components/ActionButtons.vue'
 import EventLog from '@/components/EventLog.vue'
+import WeatherPanel from '@/components/WeatherPanel.vue'
 import GameOverModal from '@/components/GameOverModal.vue'
 import { useGame } from '@/composables/useGame'
 
-const { state, highScore, canPerformAction, gatherWood, gatherStone, hunt, drink, restart } = useGame()
+const {
+  state,
+  highScore,
+  canPerformAction,
+  getActionModifierDescription,
+  gatherWood,
+  gatherStone,
+  hunt,
+  drink,
+  restart,
+} = useGame()
 
 const isNewRecord = computed(() => state.value.turn >= highScore.value && state.value.turn > 0)
+
+const woodModifiers = computed(() => getActionModifierDescription('gatherWood'))
+const stoneModifiers = computed(() => getActionModifierDescription('gatherStone'))
+const huntModifiers = computed(() => getActionModifierDescription('hunt'))
+const drinkModifiers = computed(() => getActionModifierDescription('drink'))
 </script>
 
 <template>
@@ -37,6 +53,13 @@ const isNewRecord = computed(() => state.value.turn >= highScore.value && state.
         </div>
       </div>
 
+      <div class="mb-6">
+        <WeatherPanel
+          :current-weather="state.currentWeather"
+          :next-weather="state.nextWeather"
+        />
+      </div>
+
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div class="space-y-6">
           <StatusPanel
@@ -55,6 +78,10 @@ const isNewRecord = computed(() => state.value.turn >= highScore.value && state.
             :can-hunt="canPerformAction('hunt')"
             :can-drink="canPerformAction('drink')"
             :disabled="state.isGameOver"
+            :wood-modifiers="woodModifiers"
+            :stone-modifiers="stoneModifiers"
+            :hunt-modifiers="huntModifiers"
+            :drink-modifiers="drinkModifiers"
             @gather-wood="gatherWood"
             @gather-stone="gatherStone"
             @hunt="hunt"
@@ -68,7 +95,7 @@ const isNewRecord = computed(() => state.value.turn >= highScore.value && state.
       </div>
 
       <footer class="mt-8 text-center text-gray-500 text-sm">
-        <p>💡 提示：生命值归零或饥饿/口渴值满格则游戏结束</p>
+        <p>💡 提示：生命值归零或饥饿/口渴值满格则游戏结束，注意天气变化提前准备物资</p>
       </footer>
     </div>
 

@@ -1,9 +1,92 @@
-import { ref, computed, watch } from 'vue'
-import type { GameState, LogEntry, RandomEvent, ActionType, ActionEffect } from '@/types/game'
+import { ref, computed } from 'vue'
+import type { GameState, LogEntry, RandomEvent, ActionType, ActionEffect, Weather, WeatherType } from '@/types/game'
 import { randomEvents } from '@/data/events'
 
 const STORAGE_KEY_HIGH_SCORE = 'survival_game_high_score'
 const MAX_STAT = 100
+
+const weatherDefinitions: Record<WeatherType, Weather> = {
+  sunny: {
+    type: 'sunny',
+    name: '晴天',
+    icon: '☀️',
+    description: '阳光明媚，适合外出活动',
+    actionModifiers: {
+      gatherWood: { wood: 3 },
+      gatherStone: { stone: 2 },
+      hunt: { health: 5 },
+    },
+  },
+  rainy: {
+    type: 'rainy',
+    name: '雨天',
+    icon: '🌧️',
+    description: '大雨滂沱，水源充足但行动不便',
+    actionModifiers: {
+      gatherWood: { wood: -4, health: -3 },
+      gatherStone: { stone: -3, health: -2 },
+      drink: { thirst: -15 },
+      hunt: { health: -5, hunger: 5 },
+    },
+  },
+  cold: {
+    type: 'cold',
+    name: '寒潮',
+    icon: '🥶',
+    description: '气温骤降，需要消耗更多木材取暖',
+    actionModifiers: {
+      gatherWood: { health: -5, wood: 2 },
+      gatherStone: { health: -6 },
+      hunt: { hunger: 8 },
+      drink: { wood: -3, thirst: 5 },
+    },
+  },
+  heatwave: {
+    type: 'heatwave',
+    name: '酷暑',
+    icon: '🔥',
+    description: '烈日炎炎，水分消耗加剧',
+    actionModifiers: {
+      gatherWood: { thirst: 8, health: -3 },
+      gatherStone: { thirst: 10, health: -4 },
+      hunt: { thirst: 6 },
+      drink: { thirst: -10 },
+    },
+  },
+  foggy: {
+    type: 'foggy',
+    name: '大雾',
+    icon: '🌫️',
+    description: '浓雾弥漫，视野受阻',
+    actionModifiers: {
+      gatherWood: { wood: -2 },
+      gatherStone: { stone: -2 },
+      hunt: { health: -8, hunger: 5 },
+    },
+  },
+}
+
+const weatherTypes: WeatherType[] = ['sunny', 'rainy', 'cold', 'heatwave', 'foggy']
+
+const weatherWeights: Record<WeatherType, number> = {
+  sunny: 35,
+  rainy: 20,
+  cold: 15,
+  heatwave: 15,
+  foggy: 15,
+}
+
+function generateWeather(): Weather {
+  const totalWeight = weatherTypes.reduce((sum, t) => sum + weatherWeights[t], 0)
+  let random = Math.random() * totalWeight
+  for (const type of weatherTypes) {
+    random -= weatherWeights[type]
+    if (random <= 0) {
+      return { ...weatherDefinitions[type] }
+    }
+  }
+  return { ...weatherDefinitions.sunny }
+}
 
 const actionEffects: Record<ActionType, ActionEffect> = {
   gatherWood: {
@@ -31,6 +114,8 @@ export function useGame() {
     wood: 10,
     stone: 5,
     turn: 0,
+    currentWeather: generateWeather(),
+    nextWeather: generateWeather(),
     isGameOver: false,
     logs: [],
   })
@@ -96,9 +181,68 @@ export function useGame() {
     }
   }
 
+  function mergeEffects(base: ActionEffect, modifier?: ActionEffect): ActionEffect {
+    if (!modifier) return { ...base }
+    const result: ActionEffect = { ...base }
+    const keys: (keyof ActionEffect)[] = ['health', 'hunger', 'thirst', 'wood', 'stone']
+    for (const key of keys) {
+      if (modifier[key] !== undefined) {
+        result[key] = (result[key] || 0) + modifier[key]
+      }
+    }
+    return result
+  }
+
+  function getModifiedEffects(action: ActionType): ActionEffect {
+    const base = actionEffects[action]
+    const modifier = state.value.currentWeather.actionModifiers[action]
+    return mergeEffects(base, modifier)
+  }
+
+  function getActionModifierDescription(action: ActionType): string[] {
+    const modifier = state.value.currentWeather.actionModifiers[action]
+    if (!modifier) return []
+    const descs: string[] = []
+    if (modifier.health) descs.push(`生命${modifier.health > 0 ? '+' : ''}${modifier.health}`)
+    if (modifier.hunger) descs.push(`饥饿${modifier.hunger > 0 ? '+' : ''}${modifier.hunger}`)
+    if (modifier.thirst) descs.push(`口渴${modifier.thirst > 0 ? '+' : ''}${modifier.thirst}`)
+    if (modifier.wood) descs.push(`木材${modifier.wood > 0 ? '+' : ''}${modifier.wood}`)
+    if (modifier.stone) descs.push(`石头${modifier.stone > 0 ? '+' : ''}${modifier.stone}`)
+    return descs
+  }
+
   function getRandomEvent(): RandomEvent {
-    const index = Math.floor(Math.random() * randomEvents.length)
-    return randomEvents[index]
+    const weatherType = state.value.currentWeather.type
+    const weatherEvents = randomEvents.filter(
+      (e) => e.weather && e.weather.includes(weatherType)
+    )
+    const neutralEvents = randomEvents.filter((e) => !e.weather)
+    const pool = weatherEvents.length > 0 && Math.random() < 0.6
+      ? weatherEvents
+      : neutralEvents
+    const index = Math.floor(Math.random() * pool.length)
+    return pool[index]
+  }
+
+  function applyWeatherPassiveEffects() {
+    const weather = state.value.currentWeather
+    if (weather.type === 'cold') {
+      if (state.value.wood > 0) {
+        applyEffects({ wood: -2 })
+        addLog('寒潮消耗了 2 木材用于取暖', 'event')
+      } else {
+        applyEffects({ health: -8 })
+        addLog('没有木材取暖，寒潮使你的生命值 -8', 'bad')
+      }
+    }
+    if (weather.type === 'heatwave') {
+      applyEffects({ thirst: 6 })
+      addLog('酷暑使你的口渴值 +6', 'event')
+    }
+    if (weather.type === 'rainy') {
+      applyEffects({ thirst: -4 })
+      addLog('雨水缓解了你的口渴 -4', 'good')
+    }
   }
 
   function checkGameOver() {
@@ -111,7 +255,7 @@ export function useGame() {
 
   function canPerformAction(action: ActionType): boolean {
     if (state.value.isGameOver) return false
-    const effects = actionEffects[action]
+    const effects = getModifiedEffects(action)
     if (effects.wood !== undefined && state.value.wood + effects.wood < 0) {
       return false
     }
@@ -124,17 +268,32 @@ export function useGame() {
   function performAction(action: ActionType) {
     if (!canPerformAction(action)) return
 
-    const effects = actionEffects[action]
+    state.value.currentWeather = state.value.nextWeather
+    state.value.nextWeather = generateWeather()
+
+    const effects = getModifiedEffects(action)
     applyEffects(effects)
     state.value.turn++
 
-    addLog(`第 ${state.value.turn} 回合：${actionNames[action]}`, 'action')
+    addLog(
+      `第 ${state.value.turn} 回合：${actionNames[action]}（${state.value.currentWeather.icon}${state.value.currentWeather.name}）`,
+      'action'
+    )
+
+    applyWeatherPassiveEffects()
+
+    const weatherMods = getActionModifierDescription(action)
+    if (weatherMods.length > 0) {
+      addLog(`天气影响：${weatherMods.join('，')}`, 'event')
+    }
 
     const event = getRandomEvent()
     applyEffects(event.effects)
 
     const eventLogType = event.type === 'good' ? 'good' : event.type === 'bad' ? 'bad' : 'event'
     addLog(event.text, eventLogType)
+
+    addLog(`明日天气预报：${state.value.nextWeather.icon} ${state.value.nextWeather.name} - ${state.value.nextWeather.description}`, 'system')
 
     checkGameOver()
   }
@@ -163,21 +322,40 @@ export function useGame() {
       wood: 10,
       stone: 5,
       turn: 0,
+      currentWeather: generateWeather(),
+      nextWeather: generateWeather(),
       isGameOver: false,
       logs: [],
     }
     logIdCounter = 0
     addLog('你醒来发现自己身处荒野中，需要想办法生存下去...', 'system')
+    addLog(
+      `今日天气：${state.value.currentWeather.icon} ${state.value.currentWeather.name} - ${state.value.currentWeather.description}`,
+      'system'
+    )
+    addLog(
+      `明日天气预报：${state.value.nextWeather.icon} ${state.value.nextWeather.name} - ${state.value.nextWeather.description}`,
+      'system'
+    )
   }
 
   loadHighScore()
   addLog('你醒来发现自己身处荒野中，需要想办法生存下去...', 'system')
+  addLog(
+    `今日天气：${state.value.currentWeather.icon} ${state.value.currentWeather.name} - ${state.value.currentWeather.description}`,
+    'system'
+  )
+  addLog(
+    `明日天气预报：${state.value.nextWeather.icon} ${state.value.nextWeather.name} - ${state.value.nextWeather.description}`,
+    'system'
+  )
 
   return {
     state,
     highScore,
     canAct,
     canPerformAction,
+    getActionModifierDescription,
     gatherWood,
     gatherStone,
     hunt,

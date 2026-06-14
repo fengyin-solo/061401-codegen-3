@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+
 interface ActionButton {
   label: string
   icon: string
@@ -7,6 +9,8 @@ interface ActionButton {
   disabled: boolean
   bgClass: string
   hoverClass: string
+  canPerform: boolean
+  modifiers: string[]
 }
 
 interface Props {
@@ -15,9 +19,18 @@ interface Props {
   canHunt: boolean
   canDrink: boolean
   disabled: boolean
+  woodModifiers?: string[]
+  stoneModifiers?: string[]
+  huntModifiers?: string[]
+  drinkModifiers?: string[]
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  woodModifiers: () => [],
+  stoneModifiers: () => [],
+  huntModifiers: () => [],
+  drinkModifiers: () => [],
+})
 
 const emit = defineEmits<{
   gatherWood: []
@@ -26,7 +39,7 @@ const emit = defineEmits<{
   drink: []
 }>()
 
-const buttons: ActionButton[] = [
+const buttons = computed<ActionButton[]>(() => [
   {
     label: '采集木头',
     icon: '🪵',
@@ -35,6 +48,8 @@ const buttons: ActionButton[] = [
     disabled: false,
     bgClass: 'bg-amber-900/40',
     hoverClass: 'hover:bg-amber-800/60',
+    canPerform: props.canGatherWood,
+    modifiers: props.woodModifiers,
   },
   {
     label: '采集石头',
@@ -44,6 +59,8 @@ const buttons: ActionButton[] = [
     disabled: false,
     bgClass: 'bg-gray-700/40',
     hoverClass: 'hover:bg-gray-600/60',
+    canPerform: props.canGatherStone,
+    modifiers: props.stoneModifiers,
   },
   {
     label: '打猎',
@@ -53,6 +70,8 @@ const buttons: ActionButton[] = [
     disabled: false,
     bgClass: 'bg-red-900/40',
     hoverClass: 'hover:bg-red-800/60',
+    canPerform: props.canHunt,
+    modifiers: props.huntModifiers,
   },
   {
     label: '喝水',
@@ -62,8 +81,10 @@ const buttons: ActionButton[] = [
     disabled: false,
     bgClass: 'bg-blue-900/40',
     hoverClass: 'hover:bg-blue-800/60',
+    canPerform: props.canDrink,
+    modifiers: props.drinkModifiers,
   },
-]
+])
 </script>
 
 <template>
@@ -74,15 +95,15 @@ const buttons: ActionButton[] = [
     </h2>
     <div class="grid grid-cols-2 gap-3">
       <button
-        v-for="(btn, index) in buttons"
+        v-for="btn in buttons"
         :key="btn.label"
         @click="btn.action"
-        :disabled="disabled || (index === 0 ? !canGatherWood : index === 1 ? !canGatherStone : index === 2 ? !canHunt : !canDrink)"
+        :disabled="disabled || !btn.canPerform"
         :class="[
           btn.bgClass,
           'relative p-4 rounded-xl border border-game-border transition-all duration-200',
           'flex flex-col items-center justify-center gap-2 text-center',
-          disabled || (index === 0 ? !canGatherWood : index === 1 ? !canGatherStone : index === 2 ? !canHunt : !canDrink)
+          disabled || !btn.canPerform
             ? 'opacity-40 cursor-not-allowed'
             : [btn.hoverClass, 'hover:scale-[1.02] hover:shadow-lg cursor-pointer active:scale-[0.98]'],
         ]"
@@ -90,6 +111,18 @@ const buttons: ActionButton[] = [
         <span class="text-3xl">{{ btn.icon }}</span>
         <span class="text-white font-semibold text-sm">{{ btn.label }}</span>
         <span class="text-gray-400 text-xs">{{ btn.description }}</span>
+        <div v-if="btn.modifiers.length > 0" class="flex flex-wrap justify-center gap-1 mt-1">
+          <span
+            v-for="mod in btn.modifiers"
+            :key="mod"
+            :class="[
+              'text-xs px-1.5 py-0.5 rounded font-mono',
+              mod.includes('+') ? 'bg-green-900/50 text-green-300' : 'bg-red-900/50 text-red-300',
+            ]"
+          >
+            {{ mod }}
+          </span>
+        </div>
       </button>
     </div>
   </div>
