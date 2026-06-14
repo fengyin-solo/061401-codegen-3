@@ -1,5 +1,5 @@
 import { ref, computed } from 'vue'
-import type { GameState, LogEntry, RandomEvent, ActionType, ActionEffect, Weather, WeatherType } from '@/types/game'
+import type { GameState, LogEntry, ActionType, ActionEffect, Weather, WeatherType } from '@/types/game'
 import { randomEvents } from '@/data/events'
 
 const STORAGE_KEY_HIGH_SCORE = 'survival_game_high_score'
@@ -211,21 +211,7 @@ export function useGame() {
     return descs
   }
 
-  function getRandomEvent(): RandomEvent {
-    const weatherType = state.value.currentWeather.type
-    const weatherEvents = randomEvents.filter(
-      (e) => e.weather && e.weather.includes(weatherType)
-    )
-    const neutralEvents = randomEvents.filter((e) => !e.weather)
-    const pool = weatherEvents.length > 0 && Math.random() < 0.6
-      ? weatherEvents
-      : neutralEvents
-    const index = Math.floor(Math.random() * pool.length)
-    return pool[index]
-  }
-
-  function applyWeatherPassiveEffects() {
-    const weather = state.value.currentWeather
+  function applyWeatherPassiveEffectsFor(weather: Weather) {
     if (weather.type === 'cold') {
       if (state.value.wood > 0) {
         applyEffects({ wood: -2 })
@@ -268,30 +254,49 @@ export function useGame() {
   function performAction(action: ActionType) {
     if (!canPerformAction(action)) return
 
-    state.value.currentWeather = state.value.nextWeather
-    state.value.nextWeather = generateWeather()
+    const activeWeather = state.value.currentWeather
 
-    const effects = getModifiedEffects(action)
+    const base = actionEffects[action]
+    const modifier = activeWeather.actionModifiers[action]
+    const effects = mergeEffects(base, modifier)
     applyEffects(effects)
     state.value.turn++
 
     addLog(
-      `第 ${state.value.turn} 回合：${actionNames[action]}（${state.value.currentWeather.icon}${state.value.currentWeather.name}）`,
+      `第 ${state.value.turn} 回合：${actionNames[action]}（${activeWeather.icon}${activeWeather.name}）`,
       'action'
     )
 
-    applyWeatherPassiveEffects()
-
-    const weatherMods = getActionModifierDescription(action)
-    if (weatherMods.length > 0) {
-      addLog(`天气影响：${weatherMods.join('，')}`, 'event')
+    if (modifier) {
+      const modDescs: string[] = []
+      if (modifier.health) modDescs.push(`生命${modifier.health > 0 ? '+' : ''}${modifier.health}`)
+      if (modifier.hunger) modDescs.push(`饥饿${modifier.hunger > 0 ? '+' : ''}${modifier.hunger}`)
+      if (modifier.thirst) modDescs.push(`口渴${modifier.thirst > 0 ? '+' : ''}${modifier.thirst}`)
+      if (modifier.wood) modDescs.push(`木材${modifier.wood > 0 ? '+' : ''}${modifier.wood}`)
+      if (modifier.stone) modDescs.push(`石头${modifier.stone > 0 ? '+' : ''}${modifier.stone}`)
+      if (modDescs.length > 0) {
+        addLog(`天气影响：${modDescs.join('，')}`, 'event')
+      }
     }
 
-    const event = getRandomEvent()
-    applyEffects(event.effects)
+    applyWeatherPassiveEffectsFor(activeWeather)
 
+    const weatherType = activeWeather.type
+    const weatherEvents = randomEvents.filter(
+      (e) => e.weather && e.weather.includes(weatherType)
+    )
+    const neutralEvents = randomEvents.filter((e) => !e.weather)
+    const pool = weatherEvents.length > 0 && Math.random() < 0.6
+      ? weatherEvents
+      : neutralEvents
+    const event = pool[Math.floor(Math.random() * pool.length)]
+
+    applyEffects(event.effects)
     const eventLogType = event.type === 'good' ? 'good' : event.type === 'bad' ? 'bad' : 'event'
     addLog(event.text, eventLogType)
+
+    state.value.currentWeather = state.value.nextWeather
+    state.value.nextWeather = generateWeather()
 
     addLog(`明日天气预报：${state.value.nextWeather.icon} ${state.value.nextWeather.name} - ${state.value.nextWeather.description}`, 'system')
 
